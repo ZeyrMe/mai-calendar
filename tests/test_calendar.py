@@ -1,4 +1,6 @@
 from datetime import date, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import module
@@ -43,3 +45,54 @@ def test_manage_todo_lifecycle_and_invalid_empty_text(plugin):
     )
     assert plugin.manage("complete", todo_id=row["id"])["status"] == "done"
     assert plugin.manage("list")["items"][0]["status"] == "done"
+
+
+def test_todos_are_scoped_to_stream(plugin):
+    plugin.manage(
+        "add",
+        text="当前会话",
+        start="2026-11-27T10:00:00+08:00",
+        end="2026-11-27T11:00:00+08:00",
+        stream_id="s1",
+    )
+    plugin.manage(
+        "add",
+        text="另一个会话",
+        start="2026-11-27T10:00:00+08:00",
+        end="2026-11-27T11:00:00+08:00",
+        stream_id="s2",
+    )
+    assert [row["text"] for row in plugin.todo_rows() if row["stream_id"] == "s1"] == ["当前会话"]
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_records_successful_receipt(plugin):
+    plugin.store.data["todos"].append(
+        {
+            "id": "due",
+            "owner_type": "other",
+            "text": "提醒",
+            "start": "2026-11-26T09:00:00+08:00",
+            "end": "2026-11-26T10:00:00+08:00",
+            "flexibility": "soft",
+            "remind_days": 0,
+            "status": "open",
+            "note": "",
+            "stream_id": "s",
+            "target_user_id": "u",
+            "creator_id": "c",
+            "platform": "qq",
+            "revision": 1,
+        }
+    )
+    plugin.now = lambda: datetime.fromisoformat("2026-11-27T09:00:00+08:00")
+    plugin._set_context(
+        SimpleNamespace(
+            send=SimpleNamespace(
+                text=AsyncMock(return_value={"success": True, "sent": True, "message_id": "r"})
+            )
+        )
+    )
+    await plugin.remind_due()
+    await plugin.remind_due()
+    assert plugin.store.data["reminded"]["due:1"] == "r"

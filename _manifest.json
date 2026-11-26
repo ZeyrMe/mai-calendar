@@ -23,7 +23,8 @@
   "dependencies": [],
   "capabilities": [
     "api.get",
-    "api.call"
+    "api.call",
+    "send.text"
   ],
   "i18n": {
     "default_locale": "zh-CN"

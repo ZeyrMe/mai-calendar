@@ -9,6 +9,8 @@ todos = []
 hint_chars = 80
 hint_template = "{date}：{items}"
 todo_template = "待办：{text}"
+tick_seconds = 30
+reminder_template = "{target}提醒：{text}"
 use_chinese_calendar = true
 
 [plugin]

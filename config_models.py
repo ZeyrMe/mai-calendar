@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -32,13 +32,16 @@ class Todo(PluginConfigBase):
     remind_days: int = Field(default=0, ge=0, le=365, description="提前提醒天数")
     status: Literal["open", "done", "cancelled"] = Field(default="open", description="状态")
     note: str = Field(default="", description="备注")
+    stream_id: str = Field(default="", description="提醒所在会话，由宿主填写")
+    target_user_id: str = Field(default="", description="other 待办提醒对象")
+    creator_id: str = Field(default="", description="创建者，由宿主填写")
+    platform: str = Field(default="", description="所属平台")
+    revision: int = Field(default=1, ge=1, description="修订号")
 
     @field_validator("start", "end")
     @classmethod
     def valid_datetime(cls, value):
         if value:
-            from datetime import datetime
-
             parsed = datetime.fromisoformat(value)
             if parsed.tzinfo is None:
                 raise ValueError("待办时间必须包含时区")
@@ -48,7 +51,7 @@ class Todo(PluginConfigBase):
     def valid_range(self):
         if bool(self.start) != bool(self.end):
             raise ValueError("start 与 end 必须同时填写")
-        if self.start and self.end and self.end <= self.start:
+        if self.start and self.end and datetime.fromisoformat(self.end) <= datetime.fromisoformat(self.start):
             raise ValueError("end 必须晚于 start")
         return self
 
@@ -70,6 +73,8 @@ class Config(PluginConfigBase):
     hint_chars: int = Field(default=80, ge=0, le=280, description="轻提示字数上限")
     hint_template: str = Field(default="{date}：{items}", description="轻提示模板")
     todo_template: str = Field(default="待办：{text}", description="待办提醒模板")
+    tick_seconds: int = Field(default=30, ge=5, le=300, description="到期提醒检查间隔")
+    reminder_template: str = Field(default="{target}提醒：{text}", description="到期提醒模板")
     use_chinese_calendar: bool = Field(default=True, description="使用 chinese-calendar 内置节假日判断")
 
     @field_validator("timezone")
