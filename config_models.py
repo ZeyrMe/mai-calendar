@@ -56,6 +56,11 @@ class Todo(PluginConfigBase):
         return self
 
 
+class Admin(PluginConfigBase):
+    platform: str = Field(default="qq")
+    user_id: str = Field(default="")
+
+
 class PluginInfo(PluginConfigBase):
     config_version: str = Field(default="0.1.0", description="配置版本，由 Runner 管理")
 
@@ -69,6 +74,7 @@ class Config(PluginConfigBase):
     reminder_days: int = Field(default=3, ge=0, le=30, description="特殊日期默认提前提醒天数")
     events: list[CalendarEntry] = Field(default_factory=list, description="节日、调休和倒计时配置")
     workday_overrides: dict[str, bool] = Field(default_factory=dict, description="日期到是否工作日的覆盖")
+    admins: list[Admin] = Field(default_factory=list, description="日程管理权限；亦可由 circle 鉴权")
     todos: list[Todo] = Field(default_factory=list, description="初始待办")
     hint_chars: int = Field(default=80, ge=0, le=280, description="轻提示字数上限")
     hint_template: str = Field(default="{date}：{items}", description="轻提示模板")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 import hashlib
 import json
@@ -12,7 +13,16 @@ from maibot_sdk import API, Command, HookHandler, MaiBotPlugin, Tool
 from maibot_sdk.types import HookOrder, ToolParameterInfo
 
 from .config_models import Config, Todo
-from .runtime import StateFile, inject, result
+from .runtime import (
+    StateFile,
+    inject,
+    optional_api,
+    render,
+    result,
+    send_receipt,
+    send_succeeded,
+    service_send,
+)
 
 
 def todo_item(row):
@@ -65,10 +75,15 @@ class Plugin(MaiBotPlugin):
             if parse(row["start"]) > self.now():
                 continue
             target = row["target_user_id"] if row["owner_type"] == "other" else ""
-            text = self.config.reminder_template.format(target=target, text=row["text"])
-            response = await self.ctx.send.text(text, row["stream_id"], return_details=True)
-            if isinstance(response, dict) and response.get("sent") and response.get("success"):
-                sent_keys[key] = str(response.get("message_id") or key)
+            text = render(self.config.reminder_template, target=target, text=row["text"])
+            response = await service_send(
+                self.ctx,
+                text,
+                row["stream_id"],
+                return_details=True,
+            )
+            if send_succeeded(response):
+                sent_keys[key] = send_receipt(response, key)
                 self.store.save()
 
     async def on_config_update(self, scope, config_data, version):
@@ -203,13 +218,13 @@ class Plugin(MaiBotPlugin):
         pieces = [row["title"] for row in context["events_today"]]
         pieces.extend(f"{row['title']}还有{row['days']}天" for row in context["upcoming_events"])
         pieces.extend(
-            self.config.todo_template.format(text=row["text"])
+            render(self.config.todo_template, text=row["text"])
             for row in context["todo_reminders"]
             if not row["stream_id"] or row["stream_id"] == stream_id
         )
         if not pieces:
             return ""
-        return self.config.hint_template.format(date=context["date"], items="；".join(pieces))[
+        return render(self.config.hint_template, date=context["date"], items="；".join(pieces))[
             : self.config.hint_chars
         ]
 
@@ -264,7 +279,7 @@ class Plugin(MaiBotPlugin):
         if range == "today":
             return result(self.day_context(day))
         if range == "week":
-            return result({"days": [self.day_context(day + timedelta(days=i)) for i in range(7)]})
+            return result({"days": [self.day_context(day + timedelta(days=i)) for i in builtins.range(7)]})
         try:
             return result(self.day_context(date.fromisoformat(range)))
         except ValueError:
@@ -298,6 +313,10 @@ class Plugin(MaiBotPlugin):
             existing = next((row for row in self.todo_rows() if row["id"] == todo_id), None)
             if existing and existing["stream_id"] != stream:
                 return result(error="待办不属于当前会话")
+            if not await self.can_manage(
+                action, owner_type, existing, str(message.get("platform") or ""), user_id
+            ):
+                return result(error="需要管理员或待办创建者权限")
             return result(
                 self.manage(
                     action,
@@ -359,6 +378,11 @@ class Plugin(MaiBotPlugin):
                 return result(error="manage_todo 需要 stream_id 与 creator_id")
             if action == "list":
                 return result({"items": [row for row in self.todo_rows() if row["stream_id"] == stream_id]})
+            existing = next((row for row in self.todo_rows() if row["id"] == todo_id), None)
+            if existing and existing["stream_id"] != stream_id:
+                return result(error="待办不属于当前会话")
+            if not await self.can_manage(action, owner_type, existing, platform, creator_id):
+                return result(error="需要管理员或待办创建者权限")
             return result(
                 self.manage(
                     action,
@@ -376,6 +400,23 @@ class Plugin(MaiBotPlugin):
             )
         except (TypeError, ValueError) as exc:
             return result(error=str(exc))
+
+    async def is_admin(self, platform, user_id):
+        if not self.config.enabled or not user_id:
+            return False
+        if any(row.platform == platform and row.user_id == user_id for row in self.config.admins):
+            return True
+        external = await optional_api(
+            self.ctx, "zeyr.mai-circle.is_admin", platform=platform, user_id=user_id
+        )
+        return bool(external and external.get("value"))
+
+    async def can_manage(self, action, owner_type, existing, platform, user_id):
+        if await self.is_admin(platform, user_id):
+            return True
+        if action == "add":
+            return owner_type == "other"
+        return bool(existing and existing["owner_type"] == "other" and existing["creator_id"] == user_id)
 
     @HookHandler("maisaka.planner.before_request", order=HookOrder.NORMAL)
     async def planner(self, **kwargs):
@@ -401,7 +442,15 @@ class Plugin(MaiBotPlugin):
     )
     async def todo_add(self, matched_groups=None, message=None, stream_id="", **kwargs):
         groups = matched_groups or {}
+        info = (message or {}).get("message_info") or {}
+        user = info.get("user_info") or {}
+        platform = str((message or {}).get("platform") or user.get("platform") or "")
+        user_id = str(user.get("user_id") or "")
+        if not stream_id or not user_id:
+            return False, "需要当前会话和发送者", 1
         try:
+            if not await self.can_manage("add", groups.get("owner"), None, platform, user_id):
+                return False, "需要管理员权限", 1
             row = self.manage(
                 "add",
                 groups["owner"],
@@ -409,11 +458,19 @@ class Plugin(MaiBotPlugin):
                 groups["start"],
                 groups["end"],
                 stream_id=stream_id,
+                creator_id=user_id,
+                platform=platform,
                 target_user_id=str(
                     (((message or {}).get("message_info") or {}).get("user_info") or {}).get("user_id") or ""
                 ),
             )
-            return True, f"待办已记录：{row['text']}", 2
+            text = f"待办已记录：{row['text']}"
+            await service_send(
+                self.ctx,
+                text,
+                stream_id,
+            )
+            return True, text, 2
         except (KeyError, ValueError) as exc:
             return False, str(exc), 1
 

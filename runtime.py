@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from string import Formatter
 from typing import Any
 
 
@@ -63,3 +66,47 @@ class StateFile:
         finally:
             if os.path.exists(name):
                 os.unlink(name)
+
+
+def send_succeeded(response: Any) -> bool:
+    """SDK text() returns bool or SendResult, which has no success field."""
+    return response is True or (isinstance(response, dict) and response.get("sent") is True)
+
+
+def send_receipt(response: Any, fallback: str) -> str:
+    return str(response.get("message_id") or fallback) if isinstance(response, dict) else fallback
+
+
+def render(template: str, **values: Any) -> str:
+    # Only plain named fields; never execute expressions or traverse Python objects.
+    fields = [field for _, field, _, _ in Formatter().parse(template) if field is not None]
+    if any(not re.fullmatch(r"[a-z_]+", field) for field in fields):
+        raise ValueError("模板只支持 {name} 形式的命名字段")
+    return template.format_map({key: str(value) for key, value in values.items()})
+
+
+async def optional_api(ctx: Any, full_name: str, **kwargs: Any) -> Any:
+    try:
+        async with asyncio.timeout(0.4):
+            if not await ctx.api.get(full_name, version="1"):
+                return None
+            payload = await ctx.api.call(full_name, version="1", **kwargs)
+        # Installed SDK exposes Host's outer success/result envelope.
+        while isinstance(payload, dict) and "result" in payload and "schema_version" not in payload:
+            if not payload.get("success", False):
+                return None
+            payload = payload["result"]
+        if not isinstance(payload, dict) or not payload.get("success"):
+            return None
+        return payload.get("data")
+    except (Exception, TimeoutError):
+        return None
+
+
+async def service_send(ctx: Any, text: str, stream_id: str, **kwargs: Any) -> Any:
+    """Authorize only this exact service output; day remains an optional dependency."""
+    await optional_api(ctx, "zeyr.mai-day.authorize_service_send", stream_id=stream_id, text=text)
+    try:
+        return await ctx.send.text(text, stream_id, **kwargs)
+    finally:
+        await optional_api(ctx, "zeyr.mai-day.revoke_service_send", stream_id=stream_id, text=text)

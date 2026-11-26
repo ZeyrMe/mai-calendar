@@ -5,6 +5,7 @@ timezone = "Asia/Shanghai"
 day_rollover_hour = 5
 reminder_days = 3
 events = []
+admins = []
 todos = []
 hint_chars = 80
 hint_template = "{date}：{items}"
