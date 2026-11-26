@@ -1,5 +1,17 @@
 # Generated from config_models.py; instance config.toml stays local.
+show_advanced = false
 enabled = true
+timezone = "Asia/Shanghai"
+day_rollover_hour = 5
+reminder_days = 3
+events = []
+todos = []
+hint_chars = 80
+hint_template = "{date}：{items}"
+todo_template = "待办：{text}"
+use_chinese_calendar = true
 
 [plugin]
 config_version = "0.1.0"
+
+[workday_overrides]
