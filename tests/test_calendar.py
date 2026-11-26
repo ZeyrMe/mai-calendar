@@ -189,3 +189,10 @@ async def test_reminder_uses_sdk_send_result_and_only_retries_failures(plugin, r
     await plugin.remind_due()
     assert plugin.ctx.send.text.await_count == (1 if response is True or response["sent"] else 2)
     assert (f"{row['id']}:1" in plugin.store.data["reminded"]) == (response is True or response["sent"])
+
+
+def test_legacy_workday_map_roundtrips_as_editable_entries(plugin):
+    stored = plugin.config.model_dump(mode="python")
+    assert stored["workday_overrides"] == [{"date": "2026-11-28", "is_workday": True}]
+    plugin.set_plugin_config(stored)
+    assert plugin.is_workday(date(2026, 11, 28))

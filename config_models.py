@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 from maibot_sdk import Field, PluginConfigBase
 from pydantic import field_validator, model_validator
 
+from .ecosystem import ScopeConfig
+
 
 class CalendarEntry(PluginConfigBase):
     date: str = Field(default="", description="日期 YYYY-MM-DD")
@@ -56,6 +58,18 @@ class Todo(PluginConfigBase):
         return self
 
 
+class WorkdayOverride(PluginConfigBase):
+    date: str = Field(default="", description="覆盖日期 YYYY-MM-DD")
+    is_workday: bool = Field(default=True, description="当天是否工作日")
+
+    @field_validator("date")
+    @classmethod
+    def valid_date(cls, value):
+        if value:
+            date.fromisoformat(value)
+        return value
+
+
 class Admin(PluginConfigBase):
     platform: str = Field(default="qq")
     user_id: str = Field(default="")
@@ -66,6 +80,7 @@ class PluginInfo(PluginConfigBase):
 
 
 class Config(PluginConfigBase):
+    scope: ScopeConfig = Field(default_factory=ScopeConfig, description="独立会话与用户生效范围")
     show_advanced: bool = Field(default=False, description="显示高级设置")
     plugin: PluginInfo = Field(default_factory=PluginInfo)
     enabled: bool = Field(default=True, description="启用插件")
@@ -73,7 +88,9 @@ class Config(PluginConfigBase):
     day_rollover_hour: int = Field(default=5, ge=0, le=23, description="逻辑日切换小时")
     reminder_days: int = Field(default=3, ge=0, le=30, description="特殊日期默认提前提醒天数")
     events: list[CalendarEntry] = Field(default_factory=list, description="节日、调休和倒计时配置")
-    workday_overrides: dict[str, bool] = Field(default_factory=dict, description="日期到是否工作日的覆盖")
+    workday_overrides: list[WorkdayOverride] = Field(
+        default_factory=list, description="日期与工作日状态覆盖条目"
+    )
     admins: list[Admin] = Field(default_factory=list, description="日程管理权限；亦可由 circle 鉴权")
     todos: list[Todo] = Field(default_factory=list, description="初始待办")
     hint_chars: int = Field(default=80, ge=0, le=280, description="轻提示字数上限")
@@ -82,6 +99,15 @@ class Config(PluginConfigBase):
     tick_seconds: int = Field(default=30, ge=5, le=300, description="到期提醒检查间隔")
     reminder_template: str = Field(default="{target}提醒：{text}", description="到期提醒模板")
     use_chinese_calendar: bool = Field(default=True, description="使用 chinese-calendar 内置节假日判断")
+
+    @field_validator("workday_overrides", mode="before")
+    @classmethod
+    def legacy_workdays(cls, value):
+        return (
+            [{"date": day, "is_workday": working} for day, working in value.items()]
+            if isinstance(value, dict)
+            else value
+        )
 
     @field_validator("timezone")
     @classmethod
@@ -99,3 +125,14 @@ for _name, _field in Config.model_fields.items():
             "depends_value": True,
         }
 Config.model_rebuild(force=True)
+
+
+# SDK labels otherwise fall back to Python field names in top-level sections.
+for _model in list(globals().values()):
+    if isinstance(_model, type) and issubclass(_model, PluginConfigBase):
+        for _field_name, _field_info in _model.model_fields.items():
+            _field_info.json_schema_extra = {
+                "label": _field_info.description or _field_name,
+                **(_field_info.json_schema_extra or {}),
+            }
+        _model.model_rebuild(force=True)

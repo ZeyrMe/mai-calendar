@@ -5,6 +5,7 @@ timezone = "Asia/Shanghai"
 day_rollover_hour = 5
 reminder_days = 3
 events = []
+workday_overrides = []
 admins = []
 todos = []
 hint_chars = 80
@@ -14,7 +15,16 @@ tick_seconds = 30
 reminder_template = "{target}提醒：{text}"
 use_chinese_calendar = true
 
+[scope]
+mode = "all"
+groups = []
+privates = []
+users = []
+exclude = []
+allow_private = true
+reference_cache_seconds = 60
+api_timeout_seconds = 0.4
+max_tracked_streams = 256
+
 [plugin]
 config_version = "0.1.0"
-
-[workday_overrides]

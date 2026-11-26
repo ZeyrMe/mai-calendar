@@ -13,6 +13,7 @@ from maibot_sdk import API, Command, HookHandler, MaiBotPlugin, Tool
 from maibot_sdk.types import HookOrder, ToolParameterInfo
 
 from .config_models import Config, Todo
+from .ecosystem import EcosystemMixin
 from .runtime import (
     StateFile,
     inject,
@@ -33,7 +34,7 @@ def parse(value):
     return datetime.fromisoformat(value)
 
 
-class Plugin(MaiBotPlugin):
+class Plugin(EcosystemMixin, MaiBotPlugin):
     config_model = Config
 
     def __init__(self):
@@ -41,6 +42,14 @@ class Plugin(MaiBotPlugin):
         self.store = None
         self.zone = ZoneInfo("Asia/Shanghai")
         self.task = None
+
+    @HookHandler("chat.receive.after_process")
+    async def remember_scope(self, message=None, **kwargs):
+        await self.in_scope(message, **kwargs)
+        return {"action": "continue"}
+
+    def console_text(self):
+        return f"重要日子：{len(self.config.events)}；已载入待办：{len(self.store.data['todos']) if self.store else 0}"
 
     async def on_load(self):
         self.zone = ZoneInfo(self.config.timezone)
@@ -73,6 +82,8 @@ class Plugin(MaiBotPlugin):
             if row["status"] != "open" or not row["start"] or not row["stream_id"] or key in sent_keys:
                 continue
             if parse(row["start"]) > self.now():
+                continue
+            if not await self.in_scope(stream_id=row["stream_id"]):
                 continue
             target = row["target_user_id"] if row["owner_type"] == "other" else ""
             text = render(self.config.reminder_template, target=target, text=row["text"])
@@ -112,8 +123,9 @@ class Plugin(MaiBotPlugin):
 
     def is_workday(self, day):
         key = day.isoformat()
-        if key in self.config.workday_overrides:
-            return self.config.workday_overrides[key]
+        for override in self.config.workday_overrides:
+            if override.date == key:
+                return override.is_workday
         if self.config.use_chinese_calendar:
             try:
                 from chinese_calendar import is_workday
@@ -275,6 +287,8 @@ class Plugin(MaiBotPlugin):
         visibility="visible",
     )
     async def query_calendar(self, range="today", **kwargs):
+        if not await self.in_scope(**kwargs):
+            return result(error="当前会话不在插件生效范围")
         day = self.logical_date()
         if range == "today":
             return result(self.day_context(day))
@@ -301,6 +315,8 @@ class Plugin(MaiBotPlugin):
         visibility="visible",
     )
     async def manage_todo(self, action, owner_type="self", text="", start="", end="", todo_id="", **kwargs):
+        if not await self.in_scope(**kwargs):
+            return result(error="当前会话不在插件生效范围")
         try:
             message = kwargs.get("message") or {}
             info = message.get("message_info") or {}
@@ -376,6 +392,8 @@ class Plugin(MaiBotPlugin):
         try:
             if not stream_id or not creator_id:
                 return result(error="manage_todo 需要 stream_id 与 creator_id")
+            if not await self.in_scope(stream_id=stream_id):
+                return result(error="当前会话不在插件生效范围")
             if action == "list":
                 return result({"items": [row for row in self.todo_rows() if row["stream_id"] == stream_id]})
             existing = next((row for row in self.todo_rows() if row["id"] == todo_id), None)
@@ -420,6 +438,8 @@ class Plugin(MaiBotPlugin):
 
     @HookHandler("maisaka.planner.before_request", order=HookOrder.NORMAL)
     async def planner(self, **kwargs):
+        if not await self.in_scope(**kwargs):
+            return {"action": "continue"}
         return inject(
             kwargs,
             "mai-calendar",
@@ -429,6 +449,8 @@ class Plugin(MaiBotPlugin):
 
     @HookHandler("maisaka.replyer.before_request", order=HookOrder.NORMAL)
     async def replyer(self, **kwargs):
+        if not await self.in_scope(**kwargs):
+            return {"action": "continue"}
         return inject(
             kwargs,
             "mai-calendar",
@@ -441,6 +463,8 @@ class Plugin(MaiBotPlugin):
         pattern=r"^/待办\s*\+\s*(?P<owner>self|mutual|other)\s+(?P<start>\S+)\s+(?P<end>\S+)\s+(?P<text>.+)$",
     )
     async def todo_add(self, matched_groups=None, message=None, stream_id="", **kwargs):
+        if not await self.in_scope(message, stream_id=stream_id):
+            return False, "当前会话不在插件生效范围", 1
         groups = matched_groups or {}
         info = (message or {}).get("message_info") or {}
         user = info.get("user_info") or {}
