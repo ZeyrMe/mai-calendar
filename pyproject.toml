@@ -1,8 +1,8 @@
 [project]
 name = "mai-calendar"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
-dependencies = ["maibot-plugin-sdk>=2.23,<2.24", "chinese-calendar>=1.11,<2"]
+dependencies = ["maibot-plugin-sdk>=2.23,<2.24", "chinese-calendar>=1.11,<2", "lunar-python>=1.4.8,<2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.8"]

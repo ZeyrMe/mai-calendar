@@ -24,8 +24,8 @@ def result(data: Any = None, *, error: str = "") -> dict:
 
 
 def inject(kwargs: dict, plugin_id: str, text: str, limit: int) -> dict:
-    if not text:
-        return {"action": "continue"}
+    if not text or limit <= 0:
+        return {"action": "continue", "modified_kwargs": kwargs}
     if "items" not in kwargs or kwargs.get("item_schema_version", 1) != 1:
         return {"action": "continue", "modified_kwargs": {**kwargs, "extra_prompt": text[:limit]}}
     identity = f"zeyr:{plugin_id}:context"

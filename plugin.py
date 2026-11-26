@@ -10,10 +10,12 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from maibot_sdk import API, Command, HookHandler, MaiBotPlugin, Tool
+from maibot_sdk.config_widgets import ConfigWidget, ConfigWidgetState
 from maibot_sdk.types import HookOrder, ToolParameterInfo
 
 from .config_models import Config, Todo
-from .ecosystem import EcosystemMixin
+from .dates import civil_context, occurrence, parse_time
+from .ecosystem import ChatIdentity, EcosystemMixin
 from .runtime import (
     StateFile,
     inject,
@@ -36,12 +38,22 @@ def parse(value):
 
 class Plugin(EcosystemMixin, MaiBotPlugin):
     config_model = Config
+    config_widgets = EcosystemMixin.config_widgets + [
+        ConfigWidget(id="refresh_calendar", kind="action", label="刷新今日历法"),
+        ConfigWidget(
+            id="cleanup_todos",
+            kind="action",
+            label="清理已完成或过期待办",
+            confirmation="清理已结束的事项，继续？",
+        ),
+    ]
 
     def __init__(self):
         super().__init__()
         self.store = None
         self.zone = ZoneInfo("Asia/Shanghai")
         self.task = None
+        self.calendar_status = {}
 
     @HookHandler("chat.receive.after_process")
     async def remember_scope(self, message=None, **kwargs):
@@ -49,12 +61,21 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         return {"action": "continue"}
 
     def console_text(self):
-        return f"重要日子：{len(self.config.events)}；已载入待办：{len(self.store.data['todos']) if self.store else 0}"
+        counts = (
+            {
+                owner: sum(row["owner_type"] == owner and row["status"] == "open" for row in self.todo_rows())
+                for owner in ("self", "mutual", "other", "care_note")
+            }
+            if self.store
+            else {}
+        )
+        return f"今日历法：{self.calendar_status}\n重要日子：{len(self.config.events) + len(self.config.dates)}；待办：{counts}"
 
     async def on_load(self):
         self.zone = ZoneInfo(self.config.timezone)
         self.store = StateFile(self.ctx.paths.data_dir / "calendar.json", initial_state())
         self.seed_todos()
+        self.refresh_status()
         self.task = asyncio.create_task(self.loop(), name="zeyr-mai-calendar")
 
     async def on_unload(self):
@@ -66,6 +87,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
     async def loop(self):
         while True:
             try:
+                self.refresh_status()
                 await self.remind_due()
             except asyncio.CancelledError:
                 raise
@@ -74,16 +96,20 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             await asyncio.sleep(self.config.tick_seconds)
 
     async def remind_due(self):
-        if not self.config.enabled:
+        if not self.config.enabled or not self.config.native_reminder_enabled:
             return
         sent_keys = self.store.data.setdefault("reminded", {})
         for row in self.todo_rows():
             key = f"{row['id']}:{row['revision']}"
+            if row["owner_type"] == "care_note":
+                continue
             if row["status"] != "open" or not row["start"] or not row["stream_id"] or key in sent_keys:
                 continue
             if parse(row["start"]) > self.now():
                 continue
-            if not await self.in_scope(stream_id=row["stream_id"]):
+            if not await self.target_in_scope(
+                row["platform"] or "qq", row.get("group_id", ""), row["creator_id"], row["stream_id"]
+            ):
                 continue
             target = row["target_user_id"] if row["owner_type"] == "other" else ""
             text = render(self.config.reminder_template, target=target, text=row["text"])
@@ -96,6 +122,36 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             if send_succeeded(response):
                 sent_keys[key] = send_receipt(response, key)
                 self.store.save()
+
+    def refresh_status(self):
+        if self.store:
+            context = self.day_context()
+            self.calendar_status = {
+                key: context[key] for key in ("date", "lunar", "solar_term", "is_workday", "valid")
+            }
+
+    async def get_config_widget_state(self):
+        return {
+            **await super().get_config_widget_state(),
+            "refresh_calendar": ConfigWidgetState(),
+            "cleanup_todos": ConfigWidgetState(disabled=self.store is None),
+        }
+
+    async def on_config_widget_action(self, action_id):
+        if action_id == "refresh_calendar":
+            self.refresh_status()
+            return
+        if action_id == "cleanup_todos" and self.store:
+            now = self.now()
+            self.store.data["todos"] = [
+                row
+                for row in self.store.data["todos"]
+                if row["status"] == "open" and not (row.get("end") and parse(row["end"]) < now)
+            ]
+            self.store.save()
+            self.refresh_status()
+            return
+        await super().on_config_widget_action(action_id)
 
     async def on_config_update(self, scope, config_data, version):
         self.zone = ZoneInfo(self.config.timezone)
@@ -131,29 +187,21 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                 from chinese_calendar import is_workday
 
                 return bool(is_workday(day))
-            except (ImportError, ValueError):
+            except (ImportError, ValueError, NotImplementedError):
                 pass
-        for entry in self.config.events:
+        for entry in self.config.events + self.config.dates:
             if entry.date == key and entry.kind in ("holiday", "workday"):
                 return entry.kind == "workday"
         return day.weekday() < 5
 
     def event_rows(self, day, horizon=0):
         rows = []
-        for entry in self.config.events:
+        for entry in self.config.events + self.config.dates:
             if not entry.date:
                 continue
-            original = date.fromisoformat(entry.date)
-
-            def occurrence(year):
-                try:
-                    return original.replace(year=year)
-                except ValueError:
-                    return date(year, 2, 28)
-
-            target = occurrence(day.year) if entry.yearly else original
-            if entry.yearly and target < day:
-                target = occurrence(day.year + 1)
+            target = occurrence(entry, day)
+            if target is None:
+                continue
             if day <= target <= day + timedelta(days=max(horizon, entry.reminder_days)):
                 rows.append(
                     {
@@ -181,7 +229,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                             "reminder_days": 0,
                         }
                     )
-            except (ImportError, ValueError):
+            except (ImportError, ValueError, NotImplementedError):
                 pass
         return rows
 
@@ -204,23 +252,50 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         return rows
 
     def day_context(self, day=None):
-        day = day or self.logical_date()
+        day = day or self.now().date()
         events = self.event_rows(day, self.config.reminder_days)
         reminders = [
             row
             for row in self.todo_rows()
             if row["status"] == "open"
+            and row["owner_type"] != "care_note"
             and row["start"]
             and 0 <= (parse(row["start"]).astimezone(self.zone).date() - day).days <= row["remind_days"]
         ]
+        civil = civil_context(day, self.config)
+        for title in civil["names"]:
+            if not any(row["title"] == title and row["days"] == 0 for row in events):
+                events.append(
+                    {
+                        "date": day.isoformat(),
+                        "title": title,
+                        "kind": "holiday",
+                        "days": 0,
+                        "reminder_days": 0,
+                        "note": "",
+                    }
+                )
+        valid = True
+        if self.config.use_chinese_calendar and not any(
+            row.date == day.isoformat() for row in self.config.workday_overrides
+        ):
+            try:
+                from chinese_calendar import is_workday
+
+                is_workday(day)
+            except (ValueError, ImportError, NotImplementedError):
+                valid = False
         return {
+            "lunar": civil["lunar"],
+            "solar_term": civil["solar_term"],
             "date": day.isoformat(),
             "is_workday": self.is_workday(day),
             "events_today": [row for row in events if row["days"] == 0],
             "upcoming_events": [row for row in events if 0 < row["days"] <= row["reminder_days"]],
             "todos_today": self.todo_for_day(day),
             "todo_reminders": reminders,
-            "valid": True,
+            "valid": valid,
+            "workday_source": "official_or_override" if valid else "weekday_fallback_unverified",
         }
 
     def hint(self, stream_id=""):
@@ -234,6 +309,17 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             for row in context["todo_reminders"]
             if not row["stream_id"] or row["stream_id"] == stream_id
         )
+        if self.config.care_note_enabled:
+            pieces.extend(
+                render(self.config.care_template, text=row["text"])
+                for row in self.todo_rows()
+                if row["owner_type"] == "care_note"
+                and row["status"] == "open"
+                and row["stream_id"] == stream_id
+                and row["start"]
+                and abs((parse(row["start"]) - self.now()).total_seconds())
+                <= self.config.care_hint_window_hours * 3600
+            )
         if not pieces:
             return ""
         return render(self.config.hint_template, date=context["date"], items="；".join(pieces))[
@@ -257,6 +343,27 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             raise ValueError("action 应为 list / add / complete / cancel")
         if not text.strip():
             raise ValueError("待办内容不能为空")
+        if owner_type == "care_note" and not self.config.care_note_enabled:
+            raise ValueError("随口惦记已关闭")
+        start = parse_time(start, self.now())
+        end = (
+            parse_time(end, self.now())
+            if end
+            else (parse(start) + timedelta(minutes=self.config.default_todo_minutes)).isoformat()
+            if start
+            else ""
+        )
+        if owner_type in ("self", "mutual") and start and end:
+            for existing in self.todo_rows():
+                if (
+                    existing["status"] == "open"
+                    and existing["owner_type"] in ("self", "mutual")
+                    and (existing["owner_type"] == "mutual" or existing["flexibility"] == "locked")
+                    and existing["start"]
+                    and parse(start) < parse(existing["end"])
+                    and parse(existing["start"]) < parse(end)
+                ):
+                    raise ValueError("与已确认的刚性待办冲突")
         row = Todo(
             id=todo_id or f"todo:{uuid.uuid4().hex}",
             owner_type=owner_type,
@@ -267,6 +374,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             remind_days=int(kwargs.get("remind_days", 0)),
             stream_id=kwargs.get("stream_id", ""),
             creator_id=kwargs.get("creator_id", ""),
+            group_id=kwargs.get("group_id", ""),
             platform=kwargs.get("platform", ""),
             target_user_id=kwargs.get("target_user_id", ""),
         ).model_dump(mode="json")
@@ -289,7 +397,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
     async def query_calendar(self, range="today", **kwargs):
         if not await self.in_scope(**kwargs):
             return result(error="当前会话不在插件生效范围")
-        day = self.logical_date()
+        day = self.now().date()
         if range == "today":
             return result(self.day_context(day))
         if range == "week":
@@ -301,10 +409,14 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
 
     @Tool(
         "manage_todos",
-        description="列出、添加、完成或取消待办；other 不进入生活日程。",
+        description="自然对话记事：self 本人、mutual 已同意约定、other 提醒他人、care_note 默默惦记；群聊慎分归属，私聊约定偏 mutual。先查档期再答应，惦记不报时。",
         parameters={
             "action": {"type": "string", "enum": ["list", "add", "complete", "cancel"]},
-            "owner_type": {"type": "string", "enum": ["self", "mutual", "other"], "default": "self"},
+            "owner_type": {
+                "type": "string",
+                "enum": ["self", "mutual", "other", "care_note"],
+                "default": "self",
+            },
             "text": {"type": "string", "default": ""},
             "start": {"type": "string", "default": ""},
             "end": {"type": "string", "default": ""},
@@ -319,9 +431,8 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             return result(error="当前会话不在插件生效范围")
         try:
             message = kwargs.get("message") or {}
-            info = message.get("message_info") or {}
-            user_id = str((info.get("user_info") or {}).get("user_id") or "")
-            stream = str(kwargs.get("stream_id") or message.get("session_id") or "")
+            chat = ChatIdentity.from_message(message or kwargs, kwargs.get("stream_id") or "")
+            user_id, stream = chat.user_id, chat.stream_id
             if not stream or not user_id:
                 return result(error="需要宿主提供当前会话和发送者")
             if action == "list":
@@ -329,10 +440,17 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             existing = next((row for row in self.todo_rows() if row["id"] == todo_id), None)
             if existing and existing["stream_id"] != stream:
                 return result(error="待办不属于当前会话")
-            if not await self.can_manage(
-                action, owner_type, existing, str(message.get("platform") or ""), user_id
-            ):
+            if not await self.can_manage(action, owner_type, existing, chat.platform, user_id):
                 return result(error="需要管理员或待办创建者权限")
+            if action == "add" and owner_type in ("self", "mutual") and start:
+                availability = await optional_api(
+                    self.ctx,
+                    "zeyr.mai-day.check_availability",
+                    start=parse_time(start, self.now()),
+                    end=parse_time(end, self.now()) if end else "",
+                )
+                if availability and availability.get("availability") == "conflict_locked":
+                    return result(error="与刚性日程冲突，请先商量其他时段")
             return result(
                 self.manage(
                     action,
@@ -343,7 +461,8 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                     todo_id,
                     stream_id=stream,
                     creator_id=user_id,
-                    platform=str(message.get("platform") or ""),
+                    group_id=chat.group_id,
+                    platform=chat.platform,
                     target_user_id=kwargs.get("target_user_id", user_id),
                     flexibility=kwargs.get("flexibility", "soft"),
                 )
@@ -354,7 +473,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
     @API("get_day_context", public=True, version="1")
     async def api_day_context(self, date="", **kwargs):
         try:
-            day = __import__("datetime").date.fromisoformat(date) if date else self.logical_date()
+            day = __import__("datetime").date.fromisoformat(date) if date else self.now().date()
         except ValueError:
             return result(error="date 应为 YYYY-MM-DD")
         return result(self.day_context(day))
@@ -401,6 +520,15 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                 return result(error="待办不属于当前会话")
             if not await self.can_manage(action, owner_type, existing, platform, creator_id):
                 return result(error="需要管理员或待办创建者权限")
+            if action == "add" and owner_type in ("self", "mutual") and start:
+                availability = await optional_api(
+                    self.ctx,
+                    "zeyr.mai-day.check_availability",
+                    start=parse_time(start, self.now()),
+                    end=parse_time(end, self.now()) if end else "",
+                )
+                if availability and availability.get("availability") == "conflict_locked":
+                    return result(error="与刚性日程冲突，请先商量其他时段")
             return result(
                 self.manage(
                     action,
@@ -411,6 +539,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                     todo_id,
                     stream_id=stream_id,
                     creator_id=creator_id,
+                    group_id=kwargs.get("group_id", ""),
                     platform=platform,
                     target_user_id=target_user_id,
                     flexibility=kwargs.get("flexibility", "soft"),
@@ -433,8 +562,8 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         if await self.is_admin(platform, user_id):
             return True
         if action == "add":
-            return owner_type == "other"
-        return bool(existing and existing["owner_type"] == "other" and existing["creator_id"] == user_id)
+            return owner_type in ("self", "mutual", "other", "care_note")
+        return bool(existing and existing["creator_id"] == user_id)
 
     @HookHandler("maisaka.planner.before_request", order=HookOrder.NORMAL)
     async def planner(self, **kwargs):
@@ -473,7 +602,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         if not stream_id or not user_id:
             return False, "需要当前会话和发送者", 1
         try:
-            if not await self.can_manage("add", groups.get("owner"), None, platform, user_id):
+            if groups.get("owner") != "other" and not await self.is_admin(platform, user_id):
                 return False, "需要管理员权限", 1
             row = self.manage(
                 "add",
@@ -483,6 +612,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                 groups["end"],
                 stream_id=stream_id,
                 creator_id=user_id,
+                group_id=str((info.get("group_info") or {}).get("group_id") or ""),
                 platform=platform,
                 target_user_id=str(
                     (((message or {}).get("message_info") or {}).get("user_info") or {}).get("user_id") or ""

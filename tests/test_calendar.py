@@ -127,7 +127,7 @@ async def test_api_cannot_modify_another_stream_even_as_admin(plugin):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owner", ["self", "mutual"])
-async def test_schedule_changes_require_admin_in_commands_tools_and_api(plugin, owner):
+async def test_force_commands_need_admin_but_natural_agreements_are_allowed(plugin, owner):
     plugin._set_context(SimpleNamespace(send=SimpleNamespace(text=AsyncMock())))
     message = {"platform": "qq", "session_id": "s", "message_info": {"user_info": {"user_id": "user"}}}
     command = await plugin.todo_add(
@@ -144,8 +144,8 @@ async def test_schedule_changes_require_admin_in_commands_tools_and_api(plugin, 
     api = await plugin.api_manage(
         "add", owner_type=owner, text="安排", stream_id="s", creator_id="user", platform="qq"
     )
-    assert command[0] is False and not tool["success"] and not api["success"]
-    assert not plugin.todo_rows()
+    assert command[0] is False and tool["success"] and api["success"]
+    assert len(plugin.todo_rows()) == 2
     plugin.ctx.send.text.assert_not_awaited()
 
 

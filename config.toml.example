@@ -13,6 +13,15 @@ hint_template = "{date}：{items}"
 todo_template = "待办：{text}"
 tick_seconds = 30
 reminder_template = "{target}提醒：{text}"
+enable_solar_terms = true
+enable_traditional_lunar_holidays = true
+enable_solar_holidays = true
+care_note_enabled = true
+care_hint_window_hours = 12
+care_template = "对方提过：{text}，有机会自然关心一下。"
+native_reminder_enabled = true
+default_todo_minutes = 60
+dates = []
 use_chinese_calendar = true
 
 [scope]
