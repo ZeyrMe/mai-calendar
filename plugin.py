@@ -72,11 +72,25 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             if self.store
             else {}
         )
-        holiday_summary = self.holidays.summary_text(self.now().year) if self.holidays else "未初始化"
+        holiday_summary = self.holidays.summary_text(self.now().year) if self.holidays else "暂未初始化"
+        status = self.calendar_status or {}
+        if status.get("date"):
+            work_text = "工作日" if status.get("is_workday") else "休息日"
+            if not status.get("valid", True):
+                work_text += "（未查到该年份官方调休表，按周末推算）"
+            term_text = f" · 节气：{status['solar_term']}" if status.get("solar_term") else ""
+            today_line = f"{status['date']}（农历 {status.get('lunar') or '未知'}{term_text} · {work_text}）"
+        else:
+            today_line = "等待后台刷新"
+        todo_line = (
+            f"自己 {counts.get('self', 0)} 条 · 双方约定 {counts.get('mutual', 0)} 条 · 帮记提醒 {counts.get('other', 0)} 条 · 随口惦记 {counts.get('care_note', 0)} 条"
+            if counts
+            else "暂无未完成待办"
+        )
         return (
-            f"今日历法：{self.calendar_status}\n"
-            f"调休表缓存：{holiday_summary}\n"
-            f"重要日子：{len(self.config.events) + len(self.config.dates)}；待办：{counts}"
+            f"今日历法：{today_line}\n"
+            f"年度调休缓存：{holiday_summary} · 重要日子/倒计时：{len(self.config.events) + len(self.config.dates)} 个\n"
+            f"进行中账本：{todo_line}"
         )
 
     async def on_load(self):

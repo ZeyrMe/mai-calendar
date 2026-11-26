@@ -1,89 +1,99 @@
+<div align="center">
+
 # 今天是什么日子 · `zeyr.mai-calendar`
 
-> 四级权威中国法定调休/农历/节气历法、不瞎猜阴历阳历的重要日子倒计时，以及覆盖本人、约定、他人与“随口默默惦记”的自然语言待办本。
+**每年国务院发新调休不用改代码自动缓存，记生日绝不乱猜阴历阳历，还能帮群友设提醒、默默记下对方随口一提的事**
 
-![Version](https://img.shields.io/badge/version-0.2.0-green)
-![MaiBot](https://img.shields.io/badge/MaiBot-1.4.8%2B-blue)
-![SDK](https://img.shields.io/badge/SDK-2.23.0-teal)
-![License](https://img.shields.io/badge/License-MIT-lightgrey)
+![Version](https://img.shields.io/badge/version-0.2.0-brightgreen)
+![MaiBot](https://img.shields.io/badge/MaiBot-1.4.8%2B-2f81f7)
+![SDK](https://img.shields.io/badge/SDK-2.23.0-0e8a16)
+![Standalone](https://img.shields.io/badge/独立运行-支持-blue)
 
-## 核心特性
+[为什么用它](#为什么用它) · [3 步快速开始](#3-步快速开始) · [配置项说明](#常用配置项说明) · [工具与控制台](#工具命令与控制台) · [FAQ](#常见疑问)
 
-- **四级历法权威 + 年度调休自动同步（告别每年手动升级库）**：
-  1. 用户显式手动覆盖 `workday_overrides`（最高权威）；
-  2. 本地持久化的静态年度调休 JSON 缓存（默认内置多镜像 `NateScarlet/holiday-cn` 模板，缺当年表或每年 11–12 月自动静默同步次年国务院调休并标明“放假 / 调休补班”）；
-  3. 本地 `chinese_calendar` 库离线兜底；
-  4. 周一至周五常规兜底。
-- **严格区分阳历与农历，绝不玄学猜测**：内置 `lunar-python` 自动计算二十四节气、除夕与传统农历节日；用户登记生日或纪念日时，必须显式选择 `solar` 或 `lunar`（支持闰月）才会按农历每年自动换算公历日期。
-- **三账分离 + 自然时间解析**：
-  - 历法与节气（只读背景）/ 重要日子倒计时 / 一次性待办与惦记，三张表严格隔离；
-  - 对话时间支持直接传入 `明天 20:00`、`12-01 09:30`、`周五晚上8点` 或标准 ISO 时间。
-- **自然语言四类归属 + “默默惦记 (`care_note`)”**：
-  - `self`（自己要做的事）与 `mutual`（双方约定）：可自主协商记入并同步给 `mai-day` 排进生活日程；
-  - `other`（帮朋友记事）：不进自己的日程，到点提醒对方；
-  - `care_note`（随口一提默默记着）：相手随口聊到“后天体检/明晚答辩”时静默记下，**绝不发冰冷定时闹钟**，而是在对应时间窗轻提示让 Bot 自然关心一句。
-- **与 MaiBot 1.4.8+ 原生提醒和平共存**：提供 `native_reminder_enabled` 一键开关，自由选择由本插件到点提醒，还是专心当宿主的日历与约定数据源。
+</div>
 
 ---
 
-## 安装与快速配置
+## 为什么用它
 
-将 `mai-calendar/` 放入宿主 `plugins/` 目录并重启 MaiBot（宿主会自动安装 `chinese-calendar`、`lunar-python` 与 `httpx`）。
+| 常见问题 | 常见局限 | **今天是什么日子（`zeyr.mai-calendar`）** |
+|---|---|---|
+| 年一跨，调休补班全过时 | 依赖 PyPI 静态包，每年 11 月出新调休必须手动升级容器里的包 | **四级优先级 + 静态年度 JSON 静默缓存**（缺当年或年底自动拉取 `holiday-cn` 多镜像并持久存盘） |
+| 阴历阳历瞎换算 | 自动推导把公历生日硬转成农历或把旧日期写乱 | 默认全按公历；仅你显式选了 `calendar = "lunar"` 才换算，内置节气与传统农历节日 |
+| 谁的事都塞进生活日程 | 群友喊“提醒我明天交作业”，结果 Bot 自己日程表多出个任务 | 严格分四类：**只有 `self` 和 `mutual` 会进入 `mai-day` 日程**，`other` 只提醒对方 |
+| 对方随口提一嘴的事 | 发冰冷闹钟提醒显得很奇怪，不记又显得没上心 | 新增 **`care_note` 随口惦记**：不报时，只在到时间窗对方说话时轻轻提醒 Bot 顺嘴关心一句 |
 
-`config.toml` 示例：
+---
+
+## 3 步快速开始
+
+### WebUI 上手（推荐）
+1. 将 `mai-calendar/` 放入宿主 `plugins/` 目录并重启，打开 **今天是什么日子** 配置页。
+2. 核对 **本地时区**（默认 `Asia/Shanghai`）；在 **重要日子与生日** 添上生日或倒计时（农历生日把历法下拉选成 `lunar` 并勾上重复）。
+3. 打开 **运行状态与生效范围** 面板确认今日公农历与调休缓存状态，也可以随时点击 **同步年度调休表** 立刻拉取最新年份。
+
+<details>
+<summary>手改 config.toml 示例（附完整注释）</summary>
 
 ```toml
 enabled = true
 timezone = "Asia/Shanghai"
+enable_solar_terms = true                            # 感知二十四节气（如冬至、清明）
+enable_traditional_lunar_holidays = true             # 感知春节、元宵、端午、中秋、除夕等
 
 [[dates]]
 title = "老朋友生日"
-date = "2000-08-15"
-calendar = "lunar"       # solar | lunar，农历必须显式声明
+date = "2000-08-15"                                  # 写农历八月十五
+calendar = "lunar"                                   # 必须显式指定 lunar 才会按农历换算
 yearly = true
 kind = "birthday"
-reminder_days = 3
+reminder_days = 3                                    # 提前 3 天开始在对话里提起
 
 [[workday_overrides]]
-date = "2026-10-10"
+date = "2026-10-10"                                  # 最高优先级：手动强制覆盖这一天是否上班/上课
 is_workday = true
 ```
 
+</details>
+
 ---
 
-## 工具、命令、接口与 WebUI 控制台
+## 常用配置项说明
+
+| 配置项 | 默认值 | 怎么填与效果说明 |
+|---|---|---|
+| `dates` | `[]` | 重要日子与倒计时；`calendar` 默认 `solar`（公历），阴历生日务必选 `lunar` |
+| `holiday_sync` | 自动启用 | 静态年度调休 JSON 镜像同步配置；支持配置私有/内网外代理镜像（遵循公网安全检查） |
+| `workday_overrides` | `[]` | 优先级最高的手动调休覆盖，压过远程 JSON 与本地库 |
+| `care_note_enabled` | `true` | 允许模型在聊天中记录 `care_note` 随口惦记；到前后 12 小时内自然轻提示 |
+| `native_reminder_enabled` | `true` | 是否由本插件发到期提醒；如习惯全交由 MaiBot 1.4.4+ 原生唤醒可关掉此项 |
+| `use_chinese_calendar` | `true` | 断网且无本地 JSON 缓存时的内置离线兜底库 |
+
+---
+
+## 工具、命令与控制台
 
 ### 对话工具（`@Tool`）
-| 工具名 | 主要参数 | 作用 |
-|---|---|---|
-| `query_calendar` | `range="today"` | 查询 `today` / `week` / 指定 `YYYY-MM-DD` 的公农历、节气、调休、倒计时与待办 |
-| `manage_todos` | `action`, `owner_type`, `text`, `start`, `end`, ... | 自然语言新增、列出、完成或取消 `self / mutual / other / care_note` 事项；`self / mutual` 自动检查生活档期冲突 |
-
-### 强制快捷命令
-| 命令格式 | 鉴权与效果 |
+| 工具名 | 作用 |
 |---|---|
-| `/待办 + <self\|mutual\|other> <开始时间> <结束时间> <内容>` | 帮别人记 `other` 直接放行；强制录入 `self / mutual` 需管理员权限，适合不走心理协商的硬性录入 |
+| `query_calendar(range="today")` | 查询 `today` / `week` / 指定 `YYYY-MM-DD` 的公农历、节气、调休与待办 |
+| `manage_todos(action, owner_type, text, start, end, ...)` | 自然语言记录或管理 `self / mutual / other / care_note`；时间支持 `明天 20:00`、`12-01 09:30`、`周五晚上8点`；记 `self / mutual` 会自动先检查 `mai-day` 档期是否冲突 |
 
-### 对外联动接口（`@API(..., version="1")`）
-- `get_day_context(date="")` / `get_schedulable_todos(date="")`（仅向外返回 `self / mutual`）/ `manage_todo(...)`
-
-### WebUI 运行时控制台（`config_widgets`）
-| 控件 | 类型 | 说明 |
-|---|---|---|
-| `运行状态与生效范围` | 实时状态 | 展示今日公农历、节气、工作日状态、年度调休表缓存年份及四类待办统计 |
-| `同步年度调休表` | 一键按钮 | 立即从配置镜像同步当年与次年调休 JSON 并刷新缓存 |
-| `刷新今日历法` | 一键按钮 | 立即重算今日历法与提示状态 |
-| `清理已完成或过期待办` | 二次确认按钮 | 清除已结束或过期的待办记录 |
+### 强制指令与控制台
+- **快捷强制命令**：`/待办 + <self|mutual|other> <开始> <结束> <内容>`（`other` 人人可用，`self/mutual` 需管理员）。
+- **WebUI 控制台**：`运行状态与生效范围`（今日历法 + 调休缓存年份 + 账本统计）、`同步年度调休表`、`刷新今日历法`、`清理已完成或过期待办`。
 
 ---
 
-## 生态联动与注意事项
+## 生态联动与常见疑问
 
-- **与 `mai-day` 联动**：若同装生活插件，`mutual` 会自动作为 `locked` 约定写进当天日程，`self` 依刚度排入；新增 `self / mutual` 前先调 `mai-day.check_availability` 避免与已有刚性日程撞车；到点发送与命令回执走 30 秒精确服务发送授权，绝不被睡眠门控误杀，同时严格尊重观察群禁言。
-- **跨会话隔离**：待办与 `care_note` 绑定原会话 `stream_id` 与群/用户锚点，严禁跨群修改或泄漏提示。
+- **联动关系**：与 `mai-day` 共存时为其提供放假/补班判断及 `self/mutual` 日程，并在睡着期间通过 30 秒精确授权正常发出到期提醒（绝不被误杀、绝不破坏观察群禁言）。
+- **Q：所有群共享一份待办吗？**
+  不共享。待办与 `care_note` 严格绑定原会话 `stream_id` 与群/人锚点，严禁跨群查询或修改。
 
 <details>
-<summary>开发、门禁与安全审计（独立仓库维护）</summary>
+<summary>开发、门禁与安全审计</summary>
 
 ```bash
 python3.13 -m venv .venv
@@ -91,6 +101,6 @@ python3.13 -m venv .venv
 .venv/bin/python scripts/check.py
 ```
 
-- 依赖同步包含 `chinese-calendar`、`lunar-python` 与 `httpx`，并已锁定 `.github/requirements-ci.txt` 哈希校验文件。
+- 已同步锁定 `chinese-calendar`、`lunar-python` 与 `httpx` 到 `.github/requirements-ci.txt`，包含 39 项测试。
 
 </details>
