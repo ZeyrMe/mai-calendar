@@ -12,13 +12,13 @@ hint_chars = 80
 hint_template = "{date}：{items}"
 todo_template = "待办：{text}"
 tick_seconds = 30
-reminder_template = "{target}提醒：{text}"
+reminder_template = "{target}到点啦，记得：{text}"
 enable_solar_terms = true
 enable_traditional_lunar_holidays = true
 enable_solar_holidays = true
 care_note_enabled = true
 care_hint_window_hours = 12
-care_template = "对方提过：{text}，有机会自然关心一下。"
+care_template = "对方之前随口提过「{text}」，聊天合适时可以顺嘴自然关心一下。"
 native_reminder_enabled = true
 default_todo_minutes = 60
 dates = []
@@ -37,3 +37,9 @@ max_tracked_streams = 256
 
 [plugin]
 config_version = "0.1.0"
+
+[holiday_sync]
+enabled = true
+feed_urls = ["https://cdn.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json", "https://fastly.jsdelivr.net/gh/NateScarlet/holiday-cn@master/{year}.json", "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json"]
+timeout_seconds = 8.0
+refresh_interval_days = 7

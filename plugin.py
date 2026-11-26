@@ -16,6 +16,7 @@ from maibot_sdk.types import HookOrder, ToolParameterInfo
 from .config_models import Config, Todo
 from .dates import civil_context, occurrence, parse_time
 from .ecosystem import ChatIdentity, EcosystemMixin
+from .holidays import HolidayStore
 from .runtime import (
     StateFile,
     inject,
@@ -40,6 +41,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
     config_model = Config
     config_widgets = EcosystemMixin.config_widgets + [
         ConfigWidget(id="refresh_calendar", kind="action", label="刷新今日历法"),
+        ConfigWidget(id="sync_holidays", kind="action", label="同步年度调休表"),
         ConfigWidget(
             id="cleanup_todos",
             kind="action",
@@ -51,6 +53,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
     def __init__(self):
         super().__init__()
         self.store = None
+        self.holidays = None
         self.zone = ZoneInfo("Asia/Shanghai")
         self.task = None
         self.calendar_status = {}
@@ -69,11 +72,19 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             if self.store
             else {}
         )
-        return f"今日历法：{self.calendar_status}\n重要日子：{len(self.config.events) + len(self.config.dates)}；待办：{counts}"
+        holiday_summary = self.holidays.summary_text(self.now().year) if self.holidays else "未初始化"
+        return (
+            f"今日历法：{self.calendar_status}\n"
+            f"调休表缓存：{holiday_summary}\n"
+            f"重要日子：{len(self.config.events) + len(self.config.dates)}；待办：{counts}"
+        )
 
     async def on_load(self):
         self.zone = ZoneInfo(self.config.timezone)
         self.store = StateFile(self.ctx.paths.data_dir / "calendar.json", initial_state())
+        self.holidays = HolidayStore(self.ctx.paths.data_dir / "holidays")
+        today = self.now().date()
+        self.holidays.load_from_disk([today.year, today.year + 1])
         self.seed_todos()
         self.refresh_status()
         self.task = asyncio.create_task(self.loop(), name="zeyr-mai-calendar")
@@ -84,9 +95,29 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
             with contextlib.suppress(asyncio.CancelledError):
                 await self.task
 
+    async def sync_holidays_if_needed(self, *, force=False):
+        if not self.holidays or not self.config.holiday_sync.enabled:
+            return
+        now = self.now()
+        targets = [now.year]
+        if force or now.month in (11, 12):
+            targets.append(now.year + 1)
+        for year in targets:
+            if force or self.holidays.should_refresh(
+                year, now, self.config.holiday_sync.refresh_interval_days
+            ):
+                await self.holidays.sync_year(
+                    year,
+                    self.config.holiday_sync.feed_urls,
+                    timeout_seconds=self.config.holiday_sync.timeout_seconds,
+                    now=now,
+                )
+
     async def loop(self):
+        await asyncio.sleep(3)
         while True:
             try:
+                await self.sync_holidays_if_needed()
                 self.refresh_status()
                 await self.remind_due()
             except asyncio.CancelledError:
@@ -134,11 +165,19 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         return {
             **await super().get_config_widget_state(),
             "refresh_calendar": ConfigWidgetState(),
+            "sync_holidays": ConfigWidgetState(
+                disabled=not bool(self.holidays and self.config.holiday_sync.enabled),
+                text=self.holidays.summary_text(self.now().year) if self.holidays else "",
+            ),
             "cleanup_todos": ConfigWidgetState(disabled=self.store is None),
         }
 
     async def on_config_widget_action(self, action_id):
         if action_id == "refresh_calendar":
+            self.refresh_status()
+            return
+        if action_id == "sync_holidays" and self.holidays:
+            await self.sync_holidays_if_needed(force=True)
             self.refresh_status()
             return
         if action_id == "cleanup_todos" and self.store:
@@ -182,6 +221,12 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         for override in self.config.workday_overrides:
             if override.date == key:
                 return override.is_workday
+        if self.config.holiday_sync.enabled and self.holidays:
+            synced = self.holidays.lookup(day)
+            if synced is not None:
+                return synced["is_workday"]
+            if self.holidays.has_year(day.year):
+                return day.weekday() < 5
         if self.config.use_chinese_calendar:
             try:
                 from chinese_calendar import is_workday
@@ -211,6 +256,23 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                         "note": entry.note,
                         "days": (target - day).days,
                         "reminder_days": max(horizon, entry.reminder_days),
+                    }
+                )
+        if self.config.holiday_sync.enabled and self.holidays:
+            synced = self.holidays.lookup(day)
+            if (
+                synced
+                and synced["title"]
+                and not any(row["title"] == synced["title"] and row["days"] == 0 for row in rows)
+            ):
+                rows.append(
+                    {
+                        "date": day.isoformat(),
+                        "title": synced["title"],
+                        "kind": "holiday" if synced["is_off_day"] else "workday",
+                        "note": "",
+                        "days": 0,
+                        "reminder_days": 0,
                     }
                 )
         if self.config.use_chinese_calendar:
@@ -276,9 +338,11 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
                     }
                 )
         valid = True
-        if self.config.use_chinese_calendar and not any(
-            row.date == day.isoformat() for row in self.config.workday_overrides
-        ):
+        has_override = any(row.date == day.isoformat() for row in self.config.workday_overrides)
+        has_synced = bool(
+            self.config.holiday_sync.enabled and self.holidays and self.holidays.has_year(day.year)
+        )
+        if not has_override and not has_synced and self.config.use_chinese_calendar:
             try:
                 from chinese_calendar import is_workday
 
