@@ -1,38 +1,89 @@
-# 今天是什么日子
+# 今天是什么日子 · `zeyr.mai-calendar`
 
-`zeyr.mai-calendar` · 节日、倒计时与待办提醒。
+> 四级权威中国法定调休/农历/节气历法、不瞎猜阴历阳历的重要日子倒计时，以及覆盖本人、约定、他人与“随口默默惦记”的自然语言待办本。
 
-开发基线 MaiBot 1.4.8 / SDK 2.23.0。可独立安装，其他 zeyr 插件仅通过公开 API 自动联动。
+![Version](https://img.shields.io/badge/version-0.2.0-green)
+![MaiBot](https://img.shields.io/badge/MaiBot-1.4.8%2B-blue)
+![SDK](https://img.shields.io/badge/SDK-2.23.0-teal)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-第二批已实现：本地节假日/工作日判断、日期覆盖、固定节日/生日/倒计时、逻辑日、self/mutual/other 待办、会话范围校验、成功回执去重的到期提醒、`get_day_context` / `get_schedulable_todos` / `manage_todo` API、`query_calendar` / `manage_todos` 工具和 `/待办 + ...` 短命令。`other` 只提醒，不进入 `mai-day` 的生活日程；self/mutual 待办变化会由 `mai-day` 投影到有效日程。管理接口会校验会话归属，self/mutual 修改需要本地管理员或 `mai-circle` 管理员；服务提醒在 `mai-day` 存在时使用精确短授权。
+## 核心特性
 
-安装时将整个目录同步到宿主 plugins；运行 config.toml 由 SDK 生成。实例名单、个人资料和密钥只填运行配置，不提交。
+- **四级历法权威 + 年度调休自动同步（告别每年手动升级库）**：
+  1. 用户显式手动覆盖 `workday_overrides`（最高权威）；
+  2. 本地持久化的静态年度调休 JSON 缓存（默认内置多镜像 `NateScarlet/holiday-cn` 模板，缺当年表或每年 11–12 月自动静默同步次年国务院调休并标明“放假 / 调休补班”）；
+  3. 本地 `chinese_calendar` 库离线兜底；
+  4. 周一至周五常规兜底。
+- **严格区分阳历与农历，绝不玄学猜测**：内置 `lunar-python` 自动计算二十四节气、除夕与传统农历节日；用户登记生日或纪念日时，必须显式选择 `solar` 或 `lunar`（支持闰月）才会按农历每年自动换算公历日期。
+- **三账分离 + 自然时间解析**：
+  - 历法与节气（只读背景）/ 重要日子倒计时 / 一次性待办与惦记，三张表严格隔离；
+  - 对话时间支持直接传入 `明天 20:00`、`12-01 09:30`、`周五晚上8点` 或标准 ISO 时间。
+- **自然语言四类归属 + “默默惦记 (`care_note`)”**：
+  - `self`（自己要做的事）与 `mutual`（双方约定）：可自主协商记入并同步给 `mai-day` 排进生活日程；
+  - `other`（帮朋友记事）：不进自己的日程，到点提醒对方；
+  - `care_note`（随口一提默默记着）：相手随口聊到“后天体检/明晚答辩”时静默记下，**绝不发冰冷定时闹钟**，而是在对应时间窗轻提示让 Bot 自然关心一句。
+- **与 MaiBot 1.4.8+ 原生提醒和平共存**：提供 `native_reminder_enabled` 一键开关，自由选择由本插件到点提醒，还是专心当宿主的日历与约定数据源。
 
-检查：`python -m pytest`，开发依赖见 pyproject.toml。
+---
 
+## 安装与快速配置
 
-## v2.5 第一批：范围与原生控制台
+将 `mai-calendar/` 放入宿主 `plugins/` 目录并重启 MaiBot（宿主会自动安装 `chinese-calendar`、`lunar-python` 与 `httpx`）。
 
-新增独立 `[scope]`：mode 默认 all；groups / privates / users 接受 `group:标识` / `private:标识` / `user:标识`，可带平台前缀（默认 qq）。mode=whitelist 只允许命中对象；mode=blacklist 排除命中对象；all 允许所有对象。exclude 始终优先。allow_private=false 仅放行名单明确指定的私聊，主动私聊仍需单独配置目标。
+`config.toml` 示例：
 
-可用 `@set:名称` / `@tag:名称` 复用 mai-circle 集合/标签；缺席时按空集合降级，不影响直接对象。受限模式在没有真实会话身份时跳过业务，消息仍正常进入宿主。重启后的会话身份缓存由入站消息恢复。
+```toml
+enabled = true
+timezone = "Asia/Shanghai"
 
-WebUI 配置页提供运行状态面板与“刷新公共集合缓存”按钮，不调用模型、不发送聊天。范围分组默认折叠；字段采用中文标签与结构化条目卡片。
+[[dates]]
+title = "老朋友生日"
+date = "2000-08-15"
+calendar = "lunar"       # solar | lunar，农历必须显式声明
+yearly = true
+kind = "birthday"
+reminder_days = 3
 
-workday_overrides 改为 date / is_workday 条目列表，旧字典配置自动转换。
+[[workday_overrides]]
+date = "2026-10-10"
+is_workday = true
+```
 
-本批提供公共基础设施。后续业务能力见下方 0.2.0 说明。旧配置保持可读，Runner 规范化写回后采用新结构；回退旧代码前需恢复相应配置快照。实例 config.toml 仍不进入 Git。
+---
 
+## 工具、命令、接口与 WebUI 控制台
 
-## 0.2.0 · v2.5 业务增量
+### 对话工具（`@Tool`）
+| 工具名 | 主要参数 | 作用 |
+|---|---|---|
+| `query_calendar` | `range="today"` | 查询 `today` / `week` / 指定 `YYYY-MM-DD` 的公农历、节气、调休、倒计时与待办 |
+| `manage_todos` | `action`, `owner_type`, `text`, `start`, `end`, ... | 自然语言新增、列出、完成或取消 `self / mutual / other / care_note` 事项；`self / mutual` 自动检查生活档期冲突 |
 
-历法/重要日子/一次性事项三表区分；lunar-python 提供农历、节气、除夕与显式农历年重复日期，超出 chinese_calendar 官方年份标为未经验证。自然时间支持“明天 20:00”“12-01 09:30”“周五晚上8点”。care_note 只在原会话提示、不定时催促、不进入日程。自然语言 self/mutual 可以形成约定并查询生活档期；强制 /待办 操作继续鉴权。控制台可刷新历法和清理已结束事项。
+### 强制快捷命令
+| 命令格式 | 鉴权与效果 |
+|---|---|
+| `/待办 + <self\|mutual\|other> <开始时间> <结束时间> <内容>` | 帮别人记 `other` 直接放行；强制录入 `self / mutual` 需管理员权限，适合不走心理协商的硬性录入 |
 
-接口保持 `@API(..., version="1")`，缺少可选插件时自动降级。模型生成、网络和宿主上下文效果仍需结合实例配置验收；离线测试不等同于真实聊天送达。
+### 对外联动接口（`@API(..., version="1")`）
+- `get_day_context(date="")` / `get_schedulable_todos(date="")`（仅向外返回 `self / mutual`）/ `manage_todo(...)`
 
-## 开发与门禁
+### WebUI 运行时控制台（`config_widgets`）
+| 控件 | 类型 | 说明 |
+|---|---|---|
+| `运行状态与生效范围` | 实时状态 | 展示今日公农历、节气、工作日状态、年度调休表缓存年份及四类待办统计 |
+| `同步年度调休表` | 一键按钮 | 立即从配置镜像同步当年与次年调休 JSON 并刷新缓存 |
+| `刷新今日历法` | 一键按钮 | 立即重算今日历法与提示状态 |
+| `清理已完成或过期待办` | 二次确认按钮 | 清除已结束或过期的待办记录 |
 
-此目录由 MaiBot 直接加载，不使用 `pip install .`。单独拉取本仓即可安装固定的测试环境，不依赖父目录或其他仓库：
+---
+
+## 生态联动与注意事项
+
+- **与 `mai-day` 联动**：若同装生活插件，`mutual` 会自动作为 `locked` 约定写进当天日程，`self` 依刚度排入；新增 `self / mutual` 前先调 `mai-day.check_availability` 避免与已有刚性日程撞车；到点发送与命令回执走 30 秒精确服务发送授权，绝不被睡眠门控误杀，同时严格尊重观察群禁言。
+- **跨会话隔离**：待办与 `care_note` 绑定原会话 `stream_id` 与群/用户锚点，严禁跨群修改或泄漏提示。
+
+<details>
+<summary>开发、门禁与安全审计（独立仓库维护）</summary>
 
 ```bash
 python3.13 -m venv .venv
@@ -40,25 +91,6 @@ python3.13 -m venv .venv
 .venv/bin/python scripts/check.py
 ```
 
-`check.py` 验证 Git 已跟踪文本的 UTF-8、行尾、末尾换行和尾随空格，然后运行 Ruff lint、Ruff 格式检查及全部 pytest。它不自动修复源码或重新生成示例配置；新增文件需先纳入 Git，才会参与文本检查。测试还验证示例配置与 SDK 默认值、manifest 身份/版本/运行依赖与 `pyproject.toml` 的一致性，以及已安装依赖是否满足声明。
+- 依赖同步包含 `chinese-calendar`、`lunar-python` 与 `httpx`，并已锁定 `.github/requirements-ci.txt` 哈希校验文件。
 
-GitHub Actions 在 push、pull request、手动触发和每周一运行：Python 3.12/3.13 验证、运行及开发依赖漏洞审计、Gitleaks 完整 Git 历史扫描。每仓独立执行，不调用共享 `tools`，不需要自定义密钥。Gitleaks 使用内置规则，固定 CLI 版本并校验下载 SHA-256；扫描日志隐藏发现的密钥值，不默认忽略历史发现。
-
-本地安全检查（Gitleaks CLI 版本与 CI 保持一致）：
-
-```bash
-.venv/bin/python -m pip_audit --strict --require-hashes --disable-pip -r .github/requirements-ci.txt
-gitleaks git --redact --log-opts="--all" .
-gitleaks dir --redact .
-```
-
-`.gitattributes` 统一文本 LF，Windows 批处理为 CRLF，并明确二进制资源；`.editorconfig` 统一编辑器编码、缩进和空白。Ruff 负责 Python 代码格式；JSON/TOML 由契约测试解析校验。实例配置和秘密不得提交。
-
-运行依赖范围与开发依赖在 `pyproject.toml` 中声明，`.github/requirements-ci.txt` 锁定 CI 的直接及间接依赖。修改依赖后，在仓库根目录使用 uv 重新解析并提交锁定文件；普通代码修改无需刷新依赖：
-
-```bash
-uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes --output-file .github/requirements-ci.txt
-# 有意升级到兼容范围内的新版本时，在上述命令后加 --upgrade。
-```
-
-Dependabot 每周检查 Python 依赖和 GitHub Actions 更新。接入 GitHub 后，在分支保护或 ruleset 中将 `Python 3.12`、`Python 3.13`、`Dependency audit`、`Gitleaks` 设为合并必需检查；只提交工作流文件不会自动开启分支保护。
+</details>
