@@ -91,10 +91,10 @@ class Todo(PluginConfigBase):
         json_schema_extra={
             "label": "归属类型",
             "enum_labels": {
-                "self": "self（自己的安排，会进麦的一天）",
-                "mutual": "mutual（双方约定，不可强行挪期）",
-                "other": "other（帮群友记的到点提醒）",
-                "care_note": "care_note（随口惦记，不发冰冷闹钟）",
+                "self": "self（自己的安排）",
+                "mutual": "mutual（双方约定）",
+                "other": "other（提醒他人）",
+                "care_note": "care_note（日常关心）",
             },
         },
     )
@@ -118,13 +118,13 @@ class Todo(PluginConfigBase):
     )
     flexibility: Literal["locked", "soft", "open"] = Field(
         default="soft",
-        description="日程刚度。",
+        description="日程的时间弹性。",
         json_schema_extra={
-            "label": "时间刚度",
+            "label": "时间弹性",
             "enum_labels": {
-                "locked": "locked（刚性不可让）",
-                "soft": "soft（柔和，可协商挪动）",
-                "open": "open（自由安排）",
+                "locked": "locked（固定不可调）",
+                "soft": "soft（常规，可协商调整）",
+                "open": "open（空闲可安排）",
             },
         },
     )
@@ -400,26 +400,26 @@ class Config(PluginConfigBase):
     )
     care_note_enabled: bool = Field(
         default=True,
-        description="对方随口提到考试、体检等事时默默记着，到了时间轻轻提示关心。",
+        description="记录对方提到的重要事情（如考试、体检），到时间窗口内提醒顺便关心。",
         json_schema_extra={
-            "label": "允许随口惦记",
-            "hint": "随口惦记不会发到点报时闹钟，只会在对应时间窗里作为轻提示让 Bot 自然顺嘴关心一句。",
+            "label": "启用日常关心",
+            "hint": "开启后不会发准点报时闹钟，仅在对应时间窗口内于上下文提示顺便关心一句。",
         },
     )
     care_hint_window_hours: float = Field(
         default=12,
         ge=0.5,
         le=72,
-        description="到了对方提到的时间前后几小时内，在对话里附上这句轻提示。",
+        description="在目标时间前后多少小时内附加日常关心提示。",
         json_schema_extra={
-            "label": "惦记有效小时",
-            "hint": "单位：小时（默认 12）。在这个前后时间窗内对方说话时触发一次轻关心。",
+            "label": "关心提示窗口",
+            "hint": "单位：小时（默认 12）。在这个前后时间窗内对方说话时附带一次提示。",
         },
     )
     care_template: str = Field(
-        default="对方之前随口提过「{text}」，聊天合适时可以顺嘴自然关心一下。",
-        description="随口惦记触发时给自己的轻提示写法。",
-        json_schema_extra={"label": "惦记轻提示句式", "hint": "支持 {text} 占位，保留自然的提示口吻即可。"},
+        default="对方之前提过「{text}」，聊天合适时可以顺便关心一下。",
+        description="日常关心提示语模板。",
+        json_schema_extra={"label": "关心提示语", "hint": "支持 {text} 占位符。"},
     )
     native_reminder_enabled: bool = Field(
         default=True,

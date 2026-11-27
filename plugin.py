@@ -83,14 +83,14 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
         else:
             today_line = "等待后台刷新"
         todo_line = (
-            f"自己 {counts.get('self', 0)} 条 · 双方约定 {counts.get('mutual', 0)} 条 · 帮记提醒 {counts.get('other', 0)} 条 · 随口惦记 {counts.get('care_note', 0)} 条"
+            f"自己 {counts.get('self', 0)} 条 · 双方约定 {counts.get('mutual', 0)} 条 · 帮记提醒 {counts.get('other', 0)} 条 · 日常关心 {counts.get('care_note', 0)} 条"
             if counts
             else "暂无未完成待办"
         )
         return (
             f"今日历法：{today_line}\n"
             f"年度调休缓存：{holiday_summary} · 重要日子/倒计时：{len(self.config.events) + len(self.config.dates)} 个\n"
-            f"进行中账本：{todo_line}"
+            f"当前待办：{todo_line}"
         )
 
     async def on_load(self):
@@ -464,7 +464,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
 
     @Tool(
         "query_calendar",
-        description="查询节日、工作日状态、倒计时和待办。",
+        description="查询日期、节假日、倒计时与待办事项。",
         parameters=[
             ToolParameterInfo(
                 name="range", description="today / week / YYYY-MM-DD", required=False, default="today"
@@ -487,7 +487,7 @@ class Plugin(EcosystemMixin, MaiBotPlugin):
 
     @Tool(
         "manage_todos",
-        description="自然对话记事：self 本人、mutual 已同意约定、other 提醒他人、care_note 默默惦记；群聊慎分归属，私聊约定偏 mutual。先查档期再答应，惦记不报时。",
+        description="查看、添加或修改待办事项、日程约定与日常关心。",
         parameters={
             "action": {"type": "string", "enum": ["list", "add", "complete", "cancel"]},
             "owner_type": {

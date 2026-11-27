@@ -3,7 +3,7 @@
   "id": "zeyr.mai-calendar",
   "version": "0.2.0",
   "name": "今天是什么日子",
-  "description": "节日、倒计时与待办提醒",
+  "description": "为麦麦提供日历、节假日与待办事项支持",
   "author": {
     "name": "zeyr",
     "url": "https://github.com/zeyr"
