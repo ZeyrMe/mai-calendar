@@ -2,6 +2,13 @@
 
 为麦麦提供日历、节假日与待办事项支持
 
+![Version](https://img.shields.io/badge/version-0.2.0-brightgreen)
+![MaiBot](https://img.shields.io/badge/MaiBot-1.4.8%2B-2f81f7)
+![SDK](https://img.shields.io/badge/SDK-2.23.0-0e8a16)
+![Python](https://img.shields.io/badge/Python-3.12%2B-3776ab)
+![Standalone](https://img.shields.io/badge/独立运行-支持-blue)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
+
 ## 功能介绍
 
 - **年度调休自动缓存**：自动拉取并本地缓存年度法定节假日与补班 JSON，不依赖每年升级 Python 包，断网时自动退回本地节假日库。
